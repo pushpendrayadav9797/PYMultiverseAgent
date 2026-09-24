@@ -4,13 +4,14 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-FORCE_JOIN_CHANNEL = os.getenv("FORCE_JOIN_CHANNEL")   # example: @PYMultiverseBooks
-STORAGE_CHANNEL_ID = int(os.getenv("STORAGE_CHANNEL_ID"))
+FORCE_JOIN_CHANNEL = os.getenv("FORCE_JOIN_CHANNEL")
+STORAGE_CHANNEL_ID = int(os.getenv("STORAGE_CHANNEL_ID", "0"))
 
 
 async def is_joined(bot, user_id):
@@ -21,20 +22,27 @@ async def is_joined(bot, user_id):
         return False
 
 
+# Temporary command to find channel ID
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+
+    await update.message.reply_text(
+        f"🆔 Chat ID:\n`{chat.id}`",
+        parse_mode="Markdown"
+    )
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
-    # Normal /start
     if not args:
         await update.message.reply_text(
             "👋 Welcome to PY Multiverse!\n\n"
-            "📄 File Link Bot is ready.\n"
-            "Send me a file to generate its link."
+            "📄 Send me a file to generate its link."
         )
         return
 
-    # Force Join check
     if not await is_joined(context.bot, user.id):
         keyboard = [
             [
@@ -52,14 +60,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "🔒 Please join our channel first.\n\n"
-            "After joining, press **I've Joined**.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
+            "🔒 Please join our channel first.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
 
-    # File link
     try:
         message_id = int(args[0])
 
@@ -71,7 +76,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception:
         await update.message.reply_text(
-            "❌ This file link is invalid or the file is no longer available."
+            "❌ This file link is invalid."
         )
 
 
@@ -84,8 +89,8 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await is_joined(context.bot, user.id):
         await query.answer(
-            "❌ You haven't joined the channel yet.",
-            show_alert=True,
+            "❌ Please join the channel first.",
+            show_alert=True
         )
         return
 
@@ -100,7 +105,7 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception:
         await query.message.reply_text(
-            "❌ File link is invalid or expired."
+            "❌ File link is invalid."
         )
 
 
@@ -115,18 +120,16 @@ async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         bot_username = (await context.bot.get_me()).username
-
         link = f"https://t.me/{bot_username}?start={copied.message_id}"
 
         await message.reply_text(
             "✅ File Link Generated!\n\n"
-            f"🔗 {link}\n\n"
-            "Anyone opening this link will need to join the channel first."
+            f"🔗 {link}"
         )
 
-    except Exception as e:
+    except Exception:
         await message.reply_text(
-            "❌ Error while creating link."
+            "❌ Could not create file link."
         )
 
 
@@ -134,14 +137,16 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, make_link))
-
+    app.add_handler(CommandHandler("id", get_id))
+    app.add_handler(CallbackQueryHandler(check_join, pattern=r"^check_"))
     app.add_handler(
-        __import__("telegram.ext", fromlist=["CallbackQueryHandler"])
-        .CallbackQueryHandler(check_join, pattern=r"^check_")
+        MessageHandler(
+            filters.ALL & ~filters.COMMAND,
+            make_link
+        )
     )
 
-    print("PY Multiverse File Bot started...")
+    print("PY Multiverse Agent started...")
     app.run_polling()
 
 
