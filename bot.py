@@ -133,13 +133,35 @@ async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Could not create file link."
         )
 
-
 def main():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"PY Multiverse Agent is running!")
+
+        def log_message(self, format, *args):
+            return
+
+    port = int(os.environ.get("PORT", 10000))
+
+    server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+
+    threading.Thread(
+        target=server.serve_forever,
+        daemon=True
+    ).start()
+
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("id", get_id))
-    app.add_handler(CallbackQueryHandler(check_join, pattern=r"^check_"))
+    app.add_handler(
+        CallbackQueryHandler(check_join, pattern=r"^check_")
+    )
     app.add_handler(
         MessageHandler(
             filters.ALL & ~filters.COMMAND,
