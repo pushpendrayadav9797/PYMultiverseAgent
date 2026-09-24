@@ -26,8 +26,9 @@ async def is_joined(bot, user_id):
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
 
-    await update.message.reply_text(
-        f"🆔 Chat ID:\n`{chat.id}`",
+    await context.bot.send_message(
+        chat_id=chat.id,
+        text=f"🆔 Storage Channel ID:\n`{chat.id}`",
         parse_mode="Markdown"
     )
 
