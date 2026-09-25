@@ -165,7 +165,7 @@ def main():
         CallbackQueryHandler(check_join, pattern=r"^check_")
     )
     MessageHandler(
-    filters.ChatType.PRIVATE & ~filters.COMMAND,
+    filters.ChatType.PRIVATE & ~filters.COMMAND
     make_link
     )
     )
