@@ -164,11 +164,10 @@ def main():
     app.add_handler(
         CallbackQueryHandler(check_join, pattern=r"^check_")
     )
-    app.add_handler(
-        MessageHandler(
-            filters.ALL & ~filters.COMMAND,
-            make_link
-        )
+    MessageHandler(
+    filters.ChatType.PRIVATE & ~filters.COMMAND,
+    make_link
+    )
     )
 
     print("PY Multiverse Agent started...")
