@@ -111,23 +111,23 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not update.message:
+    if not update.message:
         return
+
     message = update.message
 
     try:
         copied = await context.bot.copy_message(
             chat_id=STORAGE_CHANNEL_ID,
             from_chat_id=message.chat_id,
-            message_id=message.message_id,
+            message_id=message.message_id
         )
 
         bot_username = (await context.bot.get_me()).username
-        link = f"https://t.me/{bot_username}?start={copied.message_id}"
+        file_link = f"https://t.me/{bot_username}?start={copied.message_id}"
 
         await message.reply_text(
-            "✅ File Link Generated!\n\n"
-            f"🔗 {link}"
+            f"🔗 Your file link:\n\n{file_link}"
         )
 
     except Exception:
