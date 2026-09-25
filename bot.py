@@ -111,6 +111,8 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message:
+        return
     message = update.message
 
     try:
