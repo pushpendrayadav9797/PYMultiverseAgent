@@ -1,5 +1,6 @@
 import os
 import threading
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import (
@@ -23,18 +24,20 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FORCE_JOIN_CHANNEL = os.getenv("FORCE_JOIN_CHANNEL")
+
 STORAGE_CHANNEL_ID = int(
     os.getenv("STORAGE_CHANNEL_ID", "-1003968203837")
 )
 
 
 # =========================================================
-# CHECK CHANNEL JOIN
+# CHECK USER JOIN
 # =========================================================
 
 async def is_joined(bot, user_id):
 
     try:
+
         member = await bot.get_chat_member(
             FORCE_JOIN_CHANNEL,
             user_id
@@ -54,16 +57,18 @@ async def is_joined(bot, user_id):
 
 
 # =========================================================
-# /START
+# START
 # =========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = update.effective_user
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     if update.message is None:
         return
 
+    user = update.effective_user
     args = context.args
 
     # Normal /start
@@ -71,17 +76,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "👋 Welcome to PY Multiverse Agent!\n\n"
-            "📁 Send or forward me a file.\n"
-            "🔗 I will generate a link for you."
+            "📁 Send or forward a file.\n"
+            "🔗 You can also send a Google Drive or other URL.\n\n"
+            "I will generate a link for you."
         )
 
         return
 
-    # File link payload
     payload = args[0]
 
-    # Force Join
-    if not await is_joined(context.bot, user.id):
+    # =====================================================
+    # FORCE JOIN
+    # =====================================================
+
+    if not await is_joined(
+        context.bot,
+        user.id
+    ):
 
         channel_username = FORCE_JOIN_CHANNEL.lstrip("@")
 
@@ -102,13 +113,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "🔒 Please join our channel first.\n\n"
-            "After joining, press the button below.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            "Join the channel and then press "
+            "\"I've Joined\".",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
 
         return
 
-    # Send file from Storage Channel
+    # =====================================================
+    # DELIVER STORED MESSAGE
+    # =====================================================
+
     try:
 
         message_id = int(payload)
@@ -121,10 +138,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
 
-        print("START FILE ERROR:", e)
+        print("START DELIVERY ERROR:", e)
 
         await update.message.reply_text(
-            "❌ This file link is invalid or expired."
+            "❌ This link is invalid or expired."
         )
 
 
@@ -139,6 +156,8 @@ async def check_join(
 
     query = update.callback_query
 
+    await query.answer()
+
     payload = query.data.replace(
         "check_",
         "",
@@ -147,7 +166,10 @@ async def check_join(
 
     user = query.from_user
 
-    # Check again
+    # =====================================================
+    # CHECK JOIN AGAIN
+    # =====================================================
+
     if not await is_joined(
         context.bot,
         user.id
@@ -160,10 +182,9 @@ async def check_join(
 
         return
 
-    # Successfully joined
-    await query.answer(
-        "✅ Verified!"
-    )
+    # =====================================================
+    # SEND FILE / URL
+    # =====================================================
 
     try:
 
@@ -175,7 +196,6 @@ async def check_join(
             message_id=message_id
         )
 
-        # Remove join message
         try:
 
             await query.message.delete()
@@ -185,16 +205,46 @@ async def check_join(
 
     except Exception as e:
 
-        print("SEND FILE ERROR:", e)
+        print("CHECK JOIN DELIVERY ERROR:", e)
 
-        await query.message.reply_text(
-            "❌ File link is invalid or expired."
-        )
+        try:
+
+            await query.message.reply_text(
+                "❌ File/link is invalid or expired."
+            )
+
+        except Exception:
+            pass
 
 
 # =========================================================
-# CREATE FILE LINK
-# Supports forwarded files
+# URL DETECTION
+# =========================================================
+
+def extract_url(text):
+
+    if not text:
+        return None
+
+    # Find normal web URLs
+    pattern = r'https?://[^\s]+'
+
+    match = re.search(
+        pattern,
+        text
+    )
+
+    if match:
+
+        return match.group(0).rstrip(
+            ".,!?)]}"
+        )
+
+    return None
+
+
+# =========================================================
+# CREATE LINK
 # =========================================================
 
 async def make_link(
@@ -202,7 +252,6 @@ async def make_link(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # Only private chat
     if update.effective_chat.type != "private":
         return
 
@@ -215,10 +264,10 @@ async def make_link(
 
         stored_message = None
 
-        # -------------------------------------------------
+        # =================================================
         # DOCUMENT
-        # PDF / ZIP / APK / DOC / etc.
-        # -------------------------------------------------
+        # PDF / ZIP / APK / DOC / ETC.
+        # =================================================
 
         if message.document:
 
@@ -228,9 +277,9 @@ async def make_link(
                 caption=message.caption
             )
 
-        # -------------------------------------------------
+        # =================================================
         # VIDEO
-        # -------------------------------------------------
+        # =================================================
 
         elif message.video:
 
@@ -240,9 +289,9 @@ async def make_link(
                 caption=message.caption
             )
 
-        # -------------------------------------------------
+        # =================================================
         # AUDIO
-        # -------------------------------------------------
+        # =================================================
 
         elif message.audio:
 
@@ -252,21 +301,20 @@ async def make_link(
                 caption=message.caption
             )
 
-        # -------------------------------------------------
+        # =================================================
         # VOICE
-        # -------------------------------------------------
+        # =================================================
 
         elif message.voice:
 
             stored_message = await context.bot.send_voice(
                 chat_id=STORAGE_CHANNEL_ID,
-                voice=message.voice.file_id,
-                caption=message.caption
+                voice=message.voice.file_id
             )
 
-        # -------------------------------------------------
+        # =================================================
         # PHOTO
-        # -------------------------------------------------
+        # =================================================
 
         elif message.photo:
 
@@ -276,9 +324,9 @@ async def make_link(
                 caption=message.caption
             )
 
-        # -------------------------------------------------
+        # =================================================
         # ANIMATION / GIF
-        # -------------------------------------------------
+        # =================================================
 
         elif message.animation:
 
@@ -288,9 +336,9 @@ async def make_link(
                 caption=message.caption
             )
 
-        # -------------------------------------------------
+        # =================================================
         # VIDEO NOTE
-        # -------------------------------------------------
+        # =================================================
 
         elif message.video_note:
 
@@ -299,9 +347,9 @@ async def make_link(
                 video_note=message.video_note.file_id
             )
 
-        # -------------------------------------------------
+        # =================================================
         # STICKER
-        # -------------------------------------------------
+        # =================================================
 
         elif message.sticker:
 
@@ -310,23 +358,48 @@ async def make_link(
                 sticker=message.sticker.file_id
             )
 
-        # -------------------------------------------------
-        # UNSUPPORTED MESSAGE
-        # -------------------------------------------------
+        # =================================================
+        # URL
+        # GOOGLE DRIVE / WEBSITE / TELEGRAM / ETC.
+        # =================================================
+
+        elif message.text:
+
+            url = extract_url(
+                message.text
+            )
+
+            if not url:
+
+                await message.reply_text(
+                    "❌ Is message me koi valid URL nahi mila.\n\n"
+                    "📁 File bhejo ya\n"
+                    "🔗 https:// se start hone wala link bhejo."
+                )
+
+                return
+
+            # Store the URL as a message
+            stored_message = await context.bot.send_message(
+                chat_id=STORAGE_CHANNEL_ID,
+                text=message.text
+            )
+
+        # =================================================
+        # UNSUPPORTED
+        # =================================================
 
         else:
 
             await message.reply_text(
-                "❌ Ye message/file type supported nahi hai.\n\n"
-                "📁 PDF, DOC, ZIP, APK, Video, Audio, "
-                "Photo etc. bhejo."
+                "❌ Ye message/file type supported nahi hai."
             )
 
             return
 
-        # -------------------------------------------------
-        # CREATE LINK
-        # -------------------------------------------------
+        # =================================================
+        # GENERATE TELEGRAM LINK
+        # =================================================
 
         bot_info = await context.bot.get_me()
 
@@ -338,17 +411,19 @@ async def make_link(
         )
 
         await message.reply_text(
-            "✅ File successfully stored!\n\n"
-            f"🔗 Your file link:\n\n"
-            f"{file_link}"
+            "✅ Link successfully generated!\n\n"
+            f"🔗 {file_link}"
         )
 
     except Exception as e:
 
-        print("MAKE LINK ERROR:", e)
+        print(
+            "MAKE LINK ERROR:",
+            repr(e)
+        )
 
         await message.reply_text(
-            "❌ File ka link create nahi ho paya.\n\n"
+            "❌ Link create nahi ho paya.\n\n"
             "Check karo ki bot Storage Channel ka admin hai."
         )
 
@@ -374,10 +449,12 @@ async def get_id(
 
 
 # =========================================================
-# HEALTH SERVER FOR RENDER
+# RENDER HEALTH SERVER
 # =========================================================
 
-class HealthHandler(BaseHTTPRequestHandler):
+class HealthHandler(
+    BaseHTTPRequestHandler
+):
 
     def do_GET(self):
 
@@ -394,7 +471,11 @@ class HealthHandler(BaseHTTPRequestHandler):
             b"PY Multiverse Agent is running!"
         )
 
-    def log_message(self, format, *args):
+    def log_message(
+        self,
+        format,
+        *args
+    ):
         return
 
 
@@ -430,10 +511,12 @@ def start_health_server():
 
 def main():
 
-    # Check environment variables
     if not BOT_TOKEN:
 
-        print("ERROR: BOT_TOKEN is missing.")
+        print(
+            "ERROR: BOT_TOKEN is missing."
+        )
+
         return
 
     if not FORCE_JOIN_CHANNEL:
@@ -452,10 +535,10 @@ def main():
 
         return
 
-    # Render health server
+    # Start Render health server
     start_health_server()
 
-    # Create bot
+    # Create application
     app = (
         Application
         .builder()
@@ -479,7 +562,7 @@ def main():
         )
     )
 
-    # Join verification button
+    # Join verification
     app.add_handler(
         CallbackQueryHandler(
             check_join,
@@ -487,7 +570,7 @@ def main():
         )
     )
 
-    # Files / forwarded files
+    # Files + URLs + forwards
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE
@@ -500,14 +583,13 @@ def main():
         "PY Multiverse Agent started..."
     )
 
-    # Start bot
     app.run_polling(
         allowed_updates=Update.ALL_TYPES
     )
 
 
 # =========================================================
-# START
+# RUN
 # =========================================================
 
 if __name__ == "__main__":
