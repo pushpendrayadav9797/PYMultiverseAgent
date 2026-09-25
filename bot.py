@@ -1,6 +1,6 @@
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import (
     Update,
@@ -17,16 +17,23 @@ from telegram.ext import (
 )
 
 
+# =========================================================
+# SETTINGS
+# =========================================================
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FORCE_JOIN_CHANNEL = os.getenv("FORCE_JOIN_CHANNEL")
-STORAGE_CHANNEL_ID = int(os.getenv("STORAGE_CHANNEL_ID"))
+STORAGE_CHANNEL_ID = int(
+    os.getenv("STORAGE_CHANNEL_ID", "-1003968203837")
+)
 
 
-# -----------------------------
+# =========================================================
 # CHECK CHANNEL JOIN
-# -----------------------------
+# =========================================================
 
 async def is_joined(bot, user_id):
+
     try:
         member = await bot.get_chat_member(
             FORCE_JOIN_CHANNEL,
@@ -39,36 +46,50 @@ async def is_joined(bot, user_id):
             "creator"
         )
 
-    except Exception:
+    except Exception as e:
+
+        print("JOIN CHECK ERROR:", e)
+
         return False
 
 
-# -----------------------------
-# START COMMAND
-# -----------------------------
+# =========================================================
+# /START
+# =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
-    args = context.args
 
-    if not args:
-        await update.message.reply_text(
-            "👋 Welcome to PY Multiverse Agent!\n\n"
-            "📁 Send me a file and I will generate its link."
-        )
+    if update.message is None:
         return
 
+    args = context.args
+
+    # Normal /start
+    if not args:
+
+        await update.message.reply_text(
+            "👋 Welcome to PY Multiverse Agent!\n\n"
+            "📁 Send or forward me a file.\n"
+            "🔗 I will generate a link for you."
+        )
+
+        return
+
+    # File link payload
     payload = args[0]
 
-    # Check force join
+    # Force Join
     if not await is_joined(context.bot, user.id):
+
+        channel_username = FORCE_JOIN_CHANNEL.lstrip("@")
 
         keyboard = [
             [
                 InlineKeyboardButton(
                     "📢 Join Channel",
-                    url=f"https://t.me/{FORCE_JOIN_CHANNEL.lstrip('@')}"
+                    url=f"https://t.me/{channel_username}"
                 )
             ],
             [
@@ -80,14 +101,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await update.message.reply_text(
-            "🔒 Please join our channel first.",
+            "🔒 Please join our channel first.\n\n"
+            "After joining, press the button below.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
         return
 
-    # Send file
+    # Send file from Storage Channel
     try:
+
         message_id = int(payload)
 
         await context.bot.copy_message(
@@ -96,25 +119,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=message_id
         )
 
-    except Exception:
+    except Exception as e:
+
+        print("START FILE ERROR:", e)
+
         await update.message.reply_text(
             "❌ This file link is invalid or expired."
         )
 
 
-# -----------------------------
-# CHECK JOIN BUTTON
-# -----------------------------
+# =========================================================
+# JOIN CHECK BUTTON
+# =========================================================
 
-async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def check_join(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     query = update.callback_query
-    await query.answer()
 
-    payload = query.data.replace("check_", "", 1)
+    payload = query.data.replace(
+        "check_",
+        "",
+        1
+    )
+
     user = query.from_user
 
-    if not await is_joined(context.bot, user.id):
+    # Check again
+    if not await is_joined(
+        context.bot,
+        user.id
+    ):
 
         await query.answer(
             "❌ You haven't joined the channel yet.",
@@ -123,31 +160,49 @@ async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
+    # Successfully joined
+    await query.answer(
+        "✅ Verified!"
+    )
+
     try:
+
+        message_id = int(payload)
+
         await context.bot.copy_message(
             chat_id=user.id,
             from_chat_id=STORAGE_CHANNEL_ID,
-            message_id=int(payload)
+            message_id=message_id
         )
 
+        # Remove join message
         try:
+
             await query.message.delete()
+
         except Exception:
             pass
 
-    except Exception:
+    except Exception as e:
+
+        print("SEND FILE ERROR:", e)
+
         await query.message.reply_text(
-            "❌ File link is invalid."
+            "❌ File link is invalid or expired."
         )
 
 
-# -----------------------------
-# MAKE FILE LINK
-# -----------------------------
+# =========================================================
+# CREATE FILE LINK
+# Supports forwarded files
+# =========================================================
 
-async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def make_link(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    # ONLY PRIVATE CHAT
+    # Only private chat
     if update.effective_chat.type != "private":
         return
 
@@ -158,24 +213,134 @@ async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
 
-        # Copy file/message to storage channel
-        copied = await context.bot.copy_message(
-            chat_id=STORAGE_CHANNEL_ID,
-            from_chat_id=message.chat_id,
-            message_id=message.message_id
-        )
+        stored_message = None
 
-        bot_username = (
-            await context.bot.get_me()
-        ).username
+        # -------------------------------------------------
+        # DOCUMENT
+        # PDF / ZIP / APK / DOC / etc.
+        # -------------------------------------------------
+
+        if message.document:
+
+            stored_message = await context.bot.send_document(
+                chat_id=STORAGE_CHANNEL_ID,
+                document=message.document.file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # VIDEO
+        # -------------------------------------------------
+
+        elif message.video:
+
+            stored_message = await context.bot.send_video(
+                chat_id=STORAGE_CHANNEL_ID,
+                video=message.video.file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # AUDIO
+        # -------------------------------------------------
+
+        elif message.audio:
+
+            stored_message = await context.bot.send_audio(
+                chat_id=STORAGE_CHANNEL_ID,
+                audio=message.audio.file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # VOICE
+        # -------------------------------------------------
+
+        elif message.voice:
+
+            stored_message = await context.bot.send_voice(
+                chat_id=STORAGE_CHANNEL_ID,
+                voice=message.voice.file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # PHOTO
+        # -------------------------------------------------
+
+        elif message.photo:
+
+            stored_message = await context.bot.send_photo(
+                chat_id=STORAGE_CHANNEL_ID,
+                photo=message.photo[-1].file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # ANIMATION / GIF
+        # -------------------------------------------------
+
+        elif message.animation:
+
+            stored_message = await context.bot.send_animation(
+                chat_id=STORAGE_CHANNEL_ID,
+                animation=message.animation.file_id,
+                caption=message.caption
+            )
+
+        # -------------------------------------------------
+        # VIDEO NOTE
+        # -------------------------------------------------
+
+        elif message.video_note:
+
+            stored_message = await context.bot.send_video_note(
+                chat_id=STORAGE_CHANNEL_ID,
+                video_note=message.video_note.file_id
+            )
+
+        # -------------------------------------------------
+        # STICKER
+        # -------------------------------------------------
+
+        elif message.sticker:
+
+            stored_message = await context.bot.send_sticker(
+                chat_id=STORAGE_CHANNEL_ID,
+                sticker=message.sticker.file_id
+            )
+
+        # -------------------------------------------------
+        # UNSUPPORTED MESSAGE
+        # -------------------------------------------------
+
+        else:
+
+            await message.reply_text(
+                "❌ Ye message/file type supported nahi hai.\n\n"
+                "📁 PDF, DOC, ZIP, APK, Video, Audio, "
+                "Photo etc. bhejo."
+            )
+
+            return
+
+        # -------------------------------------------------
+        # CREATE LINK
+        # -------------------------------------------------
+
+        bot_info = await context.bot.get_me()
+
+        bot_username = bot_info.username
 
         file_link = (
             f"https://t.me/{bot_username}"
-            f"?start={copied.message_id}"
+            f"?start={stored_message.message_id}"
         )
 
         await message.reply_text(
-            f"🔗 Your file link:\n\n{file_link}"
+            "✅ File successfully stored!\n\n"
+            f"🔗 Your file link:\n\n"
+            f"{file_link}"
         )
 
     except Exception as e:
@@ -183,19 +348,46 @@ async def make_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("MAKE LINK ERROR:", e)
 
         await message.reply_text(
-            "❌ Could not create file link."
+            "❌ File ka link create nahi ho paya.\n\n"
+            "Check karo ki bot Storage Channel ka admin hai."
         )
 
 
-# -----------------------------
+# =========================================================
+# /ID
+# =========================================================
+
+async def get_id(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if update.message is None:
+        return
+
+    chat = update.effective_chat
+
+    await update.message.reply_text(
+        f"🆔 Chat ID:\n`{chat.id}`",
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
 # HEALTH SERVER FOR RENDER
-# -----------------------------
+# =========================================================
 
 class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
         self.send_response(200)
+
+        self.send_header(
+            "Content-type",
+            "text/plain"
+        )
+
         self.end_headers()
 
         self.wfile.write(
@@ -209,7 +401,10 @@ class HealthHandler(BaseHTTPRequestHandler):
 def start_health_server():
 
     port = int(
-        os.environ.get("PORT", "10000")
+        os.environ.get(
+            "PORT",
+            "10000"
+        )
     )
 
     server = ThreadingHTTPServer(
@@ -217,20 +412,50 @@ def start_health_server():
         HealthHandler
     )
 
-    threading.Thread(
+    thread = threading.Thread(
         target=server.serve_forever,
         daemon=True
-    ).start()
+    )
+
+    thread.start()
+
+    print(
+        f"Health server running on port {port}"
+    )
 
 
-# -----------------------------
+# =========================================================
 # MAIN
-# -----------------------------
+# =========================================================
 
 def main():
 
+    # Check environment variables
+    if not BOT_TOKEN:
+
+        print("ERROR: BOT_TOKEN is missing.")
+        return
+
+    if not FORCE_JOIN_CHANNEL:
+
+        print(
+            "ERROR: FORCE_JOIN_CHANNEL is missing."
+        )
+
+        return
+
+    if not STORAGE_CHANNEL_ID:
+
+        print(
+            "ERROR: STORAGE_CHANNEL_ID is missing."
+        )
+
+        return
+
+    # Render health server
     start_health_server()
 
+    # Create bot
     app = (
         Application
         .builder()
@@ -254,7 +479,7 @@ def main():
         )
     )
 
-    # Join check button
+    # Join verification button
     app.add_handler(
         CallbackQueryHandler(
             check_join,
@@ -262,36 +487,28 @@ def main():
         )
     )
 
-    # IMPORTANT:
-    # Only private messages will be processed.
-    # Group messages will be ignored.
+    # Files / forwarded files
     app.add_handler(
         MessageHandler(
-            filters.ChatType.PRIVATE & ~filters.COMMAND,
+            filters.ChatType.PRIVATE
+            & ~filters.COMMAND,
             make_link
         )
     )
 
-    print("PY Multiverse Agent started...")
+    print(
+        "PY Multiverse Agent started..."
+    )
 
-    app.run_polling()
-
-
-# -----------------------------
-# STORAGE ID COMMAND
-# -----------------------------
-
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    chat = update.effective_chat
-
-    await update.message.reply_text(
-        f"🆔 Chat ID:\n`{chat.id}`",
-        parse_mode="Markdown"
+    # Start bot
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES
     )
 
 
-# -----------------------------
+# =========================================================
+# START
+# =========================================================
 
 if __name__ == "__main__":
     main()
