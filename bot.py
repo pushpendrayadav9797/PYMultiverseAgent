@@ -1,6 +1,6 @@
 import os
-import threading
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import (
@@ -23,15 +23,21 @@ from telegram.ext import (
 # =========================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-FORCE_JOIN_CHANNEL = os.getenv("FORCE_JOIN_CHANNEL")
+
+FORCE_JOIN_CHANNEL = os.getenv(
+    "FORCE_JOIN_CHANNEL"
+)
 
 STORAGE_CHANNEL_ID = int(
-    os.getenv("STORAGE_CHANNEL_ID", "-1003968203837")
+    os.getenv(
+        "STORAGE_CHANNEL_ID",
+        "-1003968203837"
+    )
 )
 
 
 # =========================================================
-# CHECK USER JOIN
+# FORCE JOIN CHECK
 # =========================================================
 
 async def is_joined(bot, user_id):
@@ -51,7 +57,10 @@ async def is_joined(bot, user_id):
 
     except Exception as e:
 
-        print("JOIN CHECK ERROR:", e)
+        print(
+            "JOIN CHECK ERROR:",
+            repr(e)
+        )
 
         return False
 
@@ -69,62 +78,79 @@ async def start(
         return
 
     user = update.effective_user
+
     args = context.args
 
-    # Normal /start
+    # -----------------------------------------------------
+    # NORMAL /START
+    # -----------------------------------------------------
+
     if not args:
 
         await update.message.reply_text(
             "👋 Welcome to PY Multiverse Agent!\n\n"
-            "📁 Send or forward a file.\n"
-            "🔗 You can also send a Google Drive or other URL.\n\n"
+            "📁 Send or forward me a file.\n"
+            "🔗 You can also send any URL.\n\n"
             "I will generate a link for you."
         )
 
         return
 
+    # Link payload
     payload = args[0]
 
-    # =====================================================
+    # -----------------------------------------------------
     # FORCE JOIN
-    # =====================================================
+    # -----------------------------------------------------
 
     if not await is_joined(
         context.bot,
         user.id
     ):
 
-        channel_username = FORCE_JOIN_CHANNEL.lstrip("@")
+        channel_username = (
+            FORCE_JOIN_CHANNEL.lstrip("@")
+        )
 
         keyboard = [
+
             [
                 InlineKeyboardButton(
                     "📢 Join Channel",
-                    url=f"https://t.me/{channel_username}"
+                    url=(
+                        f"https://t.me/"
+                        f"{channel_username}"
+                    )
                 )
             ],
+
             [
                 InlineKeyboardButton(
                     "✅ I've Joined",
-                    callback_data=f"check_{payload}"
+                    callback_data=(
+                        f"check_{payload}"
+                    )
                 )
             ]
+
         ]
 
         await update.message.reply_text(
             "🔒 Please join our channel first.\n\n"
             "Join the channel and then press "
             "\"I've Joined\".",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
+            reply_markup=(
+                InlineKeyboardMarkup(
+                    keyboard
+                )
             )
         )
 
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # DELIVER STORED MESSAGE
-    # =====================================================
+    # -----------------------------------------------------
 
     try:
 
@@ -138,7 +164,10 @@ async def start(
 
     except Exception as e:
 
-        print("START DELIVERY ERROR:", e)
+        print(
+            "START DELIVERY ERROR:",
+            repr(e)
+        )
 
         await update.message.reply_text(
             "❌ This link is invalid or expired."
@@ -146,7 +175,7 @@ async def start(
 
 
 # =========================================================
-# JOIN CHECK BUTTON
+# JOIN VERIFICATION BUTTON
 # =========================================================
 
 async def check_join(
@@ -156,8 +185,6 @@ async def check_join(
 
     query = update.callback_query
 
-    await query.answer()
-
     payload = query.data.replace(
         "check_",
         "",
@@ -166,9 +193,9 @@ async def check_join(
 
     user = query.from_user
 
-    # =====================================================
-    # CHECK JOIN AGAIN
-    # =====================================================
+    # -----------------------------------------------------
+    # CHECK JOIN
+    # -----------------------------------------------------
 
     if not await is_joined(
         context.bot,
@@ -182,9 +209,13 @@ async def check_join(
 
         return
 
-    # =====================================================
-    # SEND FILE / URL
-    # =====================================================
+    await query.answer(
+        "✅ Verified!"
+    )
+
+    # -----------------------------------------------------
+    # SEND STORED FILE / URL
+    # -----------------------------------------------------
 
     try:
 
@@ -196,6 +227,7 @@ async def check_join(
             message_id=message_id
         )
 
+        # Delete join message
         try:
 
             await query.message.delete()
@@ -205,7 +237,10 @@ async def check_join(
 
     except Exception as e:
 
-        print("CHECK JOIN DELIVERY ERROR:", e)
+        print(
+            "CHECK JOIN DELIVERY ERROR:",
+            repr(e)
+        )
 
         try:
 
@@ -218,7 +253,7 @@ async def check_join(
 
 
 # =========================================================
-# URL DETECTION
+# URL DETECTOR
 # =========================================================
 
 def extract_url(text):
@@ -226,8 +261,7 @@ def extract_url(text):
     if not text:
         return None
 
-    # Find normal web URLs
-    pattern = r'https?://[^\s]+'
+    pattern = r"https?://[^\s]+"
 
     match = re.search(
         pattern,
@@ -245,6 +279,22 @@ def extract_url(text):
 
 # =========================================================
 # CREATE LINK
+#
+# Supports:
+# Direct files
+# Forwarded files
+# Photos
+# Videos
+# Audio
+# Documents
+# APK
+# ZIP
+# GIF
+# Voice
+# Video Note
+# Stickers
+# Google Drive URL
+# Any HTTPS URL
 # =========================================================
 
 async def make_link(
@@ -252,6 +302,7 @@ async def make_link(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # Only private chat
     if update.effective_chat.type != "private":
         return
 
@@ -265,102 +316,182 @@ async def make_link(
         stored_message = None
 
         # =================================================
-        # DOCUMENT
-        # PDF / ZIP / APK / DOC / ETC.
+        # 1. DOCUMENT
+        #
+        # PDF / DOC / ZIP / APK / RAR / etc.
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         if message.document:
 
-            stored_message = await context.bot.send_document(
-                chat_id=STORAGE_CHANNEL_ID,
-                document=message.document.file_id,
-                caption=message.caption
+            print(
+                "DOCUMENT RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_document(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    document=(
+                        message.document.file_id
+                    ),
+                    caption=message.caption
+                )
             )
 
         # =================================================
-        # VIDEO
+        # 2. VIDEO
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.video:
 
-            stored_message = await context.bot.send_video(
-                chat_id=STORAGE_CHANNEL_ID,
-                video=message.video.file_id,
-                caption=message.caption
+            print(
+                "VIDEO RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_video(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    video=message.video.file_id,
+                    caption=message.caption
+                )
             )
 
         # =================================================
-        # AUDIO
+        # 3. AUDIO
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.audio:
 
-            stored_message = await context.bot.send_audio(
-                chat_id=STORAGE_CHANNEL_ID,
-                audio=message.audio.file_id,
-                caption=message.caption
+            print(
+                "AUDIO RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_audio(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    audio=message.audio.file_id,
+                    caption=message.caption
+                )
             )
 
         # =================================================
-        # VOICE
-        # =================================================
-
-        elif message.voice:
-
-            stored_message = await context.bot.send_voice(
-                chat_id=STORAGE_CHANNEL_ID,
-                voice=message.voice.file_id
-            )
-
-        # =================================================
-        # PHOTO
+        # 4. PHOTO
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.photo:
 
-            stored_message = await context.bot.send_photo(
-                chat_id=STORAGE_CHANNEL_ID,
-                photo=message.photo[-1].file_id,
-                caption=message.caption
+            print(
+                "PHOTO RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_photo(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    photo=(
+                        message.photo[-1].file_id
+                    ),
+                    caption=message.caption
+                )
             )
 
         # =================================================
-        # ANIMATION / GIF
+        # 5. ANIMATION / GIF
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.animation:
 
-            stored_message = await context.bot.send_animation(
-                chat_id=STORAGE_CHANNEL_ID,
-                animation=message.animation.file_id,
-                caption=message.caption
+            print(
+                "ANIMATION RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_animation(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    animation=(
+                        message.animation.file_id
+                    ),
+                    caption=message.caption
+                )
             )
 
         # =================================================
-        # VIDEO NOTE
+        # 6. VOICE
+        #
+        # DIRECT + FORWARDED BOTH
+        # =================================================
+
+        elif message.voice:
+
+            print(
+                "VOICE RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_voice(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    voice=message.voice.file_id
+                )
+            )
+
+        # =================================================
+        # 7. VIDEO NOTE
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.video_note:
 
-            stored_message = await context.bot.send_video_note(
-                chat_id=STORAGE_CHANNEL_ID,
-                video_note=message.video_note.file_id
+            print(
+                "VIDEO NOTE RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_video_note(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    video_note=(
+                        message.video_note.file_id
+                    )
+                )
             )
 
         # =================================================
-        # STICKER
+        # 8. STICKER
+        #
+        # DIRECT + FORWARDED BOTH
         # =================================================
 
         elif message.sticker:
 
-            stored_message = await context.bot.send_sticker(
-                chat_id=STORAGE_CHANNEL_ID,
-                sticker=message.sticker.file_id
+            print(
+                "STICKER RECEIVED"
+            )
+
+            stored_message = (
+                await context.bot.send_sticker(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    sticker=(
+                        message.sticker.file_id
+                    )
+                )
             )
 
         # =================================================
-        # URL
-        # GOOGLE DRIVE / WEBSITE / TELEGRAM / ETC.
+        # 9. TEXT URL
+        #
+        # GOOGLE DRIVE
+        # MEGA
+        # WEBSITE
+        # TELEGRAM URL
+        # ANY HTTPS URL
         # =================================================
 
         elif message.text:
@@ -372,47 +503,64 @@ async def make_link(
             if not url:
 
                 await message.reply_text(
-                    "❌ Is message me koi valid URL nahi mila.\n\n"
-                    "📁 File bhejo ya\n"
-                    "🔗 https:// se start hone wala link bhejo."
+                    "❌ Is message me valid URL nahi mila.\n\n"
+                    "🔗 https:// se start hone wala "
+                    "link bhejo."
                 )
 
                 return
 
-            # Store the URL as a message
-            stored_message = await context.bot.send_message(
-                chat_id=STORAGE_CHANNEL_ID,
-                text=message.text
+            print(
+                "URL RECEIVED:",
+                url
+            )
+
+            # Store original URL
+            stored_message = (
+                await context.bot.send_message(
+                    chat_id=STORAGE_CHANNEL_ID,
+                    text=message.text
+                )
             )
 
         # =================================================
-        # UNSUPPORTED
+        # 10. UNSUPPORTED
         # =================================================
 
         else:
 
             await message.reply_text(
-                "❌ Ye message/file type supported nahi hai."
+                "❌ Ye message/file type "
+                "supported nahi hai."
             )
 
             return
 
         # =================================================
-        # GENERATE TELEGRAM LINK
+        # GENERATE BOT LINK
         # =================================================
 
-        bot_info = await context.bot.get_me()
+        bot_info = (
+            await context.bot.get_me()
+        )
 
         bot_username = bot_info.username
 
-        file_link = (
-            f"https://t.me/{bot_username}"
-            f"?start={stored_message.message_id}"
+        generated_link = (
+            f"https://t.me/"
+            f"{bot_username}"
+            f"?start="
+            f"{stored_message.message_id}"
         )
 
         await message.reply_text(
-            "✅ Link successfully generated!\n\n"
-            f"🔗 {file_link}"
+            "✅ Link Generated!\n\n"
+            f"🔗 {generated_link}"
+        )
+
+        print(
+            "LINK GENERATED:",
+            generated_link
         )
 
     except Exception as e:
@@ -423,13 +571,14 @@ async def make_link(
         )
 
         await message.reply_text(
-            "❌ Link create nahi ho paya.\n\n"
-            "Check karo ki bot Storage Channel ka admin hai."
+            "❌ Link generate nahi ho paya.\n\n"
+            "Check karo ki bot Storage Channel "
+            "ka admin hai."
         )
 
 
 # =========================================================
-# /ID
+# /ID COMMAND
 # =========================================================
 
 async def get_id(
@@ -458,7 +607,9 @@ class HealthHandler(
 
     def do_GET(self):
 
-        self.send_response(200)
+        self.send_response(
+            200
+        )
 
         self.send_header(
             "Content-type",
@@ -476,6 +627,7 @@ class HealthHandler(
         format,
         *args
     ):
+
         return
 
 
@@ -489,7 +641,10 @@ def start_health_server():
     )
 
     server = ThreadingHTTPServer(
-        ("0.0.0.0", port),
+        (
+            "0.0.0.0",
+            port
+        ),
         HealthHandler
     )
 
@@ -510,6 +665,10 @@ def start_health_server():
 # =========================================================
 
 def main():
+
+    # -----------------------------------------------------
+    # CHECK SETTINGS
+    # -----------------------------------------------------
 
     if not BOT_TOKEN:
 
@@ -535,10 +694,16 @@ def main():
 
         return
 
-    # Start Render health server
+    # -----------------------------------------------------
+    # HEALTH SERVER
+    # -----------------------------------------------------
+
     start_health_server()
 
-    # Create application
+    # -----------------------------------------------------
+    # CREATE APPLICATION
+    # -----------------------------------------------------
+
     app = (
         Application
         .builder()
@@ -546,7 +711,10 @@ def main():
         .build()
     )
 
-    # /start
+    # -----------------------------------------------------
+    # /START
+    # -----------------------------------------------------
+
     app.add_handler(
         CommandHandler(
             "start",
@@ -554,7 +722,10 @@ def main():
         )
     )
 
-    # /id
+    # -----------------------------------------------------
+    # /ID
+    # -----------------------------------------------------
+
     app.add_handler(
         CommandHandler(
             "id",
@@ -562,7 +733,10 @@ def main():
         )
     )
 
-    # Join verification
+    # -----------------------------------------------------
+    # JOIN BUTTON
+    # -----------------------------------------------------
+
     app.add_handler(
         CallbackQueryHandler(
             check_join,
@@ -570,7 +744,10 @@ def main():
         )
     )
 
-    # Files + URLs + forwards
+    # -----------------------------------------------------
+    # FILES + FORWARDED FILES + URLS
+    # -----------------------------------------------------
+
     app.add_handler(
         MessageHandler(
             filters.ChatType.PRIVATE
@@ -583,14 +760,19 @@ def main():
         "PY Multiverse Agent started..."
     )
 
+    # -----------------------------------------------------
+    # START POLLING
+    # -----------------------------------------------------
+
     app.run_polling(
         allowed_updates=Update.ALL_TYPES
     )
 
 
 # =========================================================
-# RUN
+# RUN BOT
 # =========================================================
 
 if __name__ == "__main__":
+
     main()
